@@ -1,0 +1,55 @@
+/*
+Get the runtime stats interval for @start and @stop from this query:
+ 
+SELECT TOP 10 
+runtime_stats_interval_id
+, CONVERT(VARCHAR(50), CAST(start_time AS DATETIMEOFFSET), 127) as 'start_time'
+, CONVERT(VARCHAR(50), CAST(end_time AS DATETIMEOFFSET), 127) as 'end_time'
+       , start_time AT TIME ZONE 'Pacific Standard Time' as 'start_time_PST'
+       , end_time AT TIME ZONE 'Pacific Standard Time' as 'end_time_PST'
+FROM sys.query_store_runtime_stats_interval
+ORDER BY runtime_stats_interval_id DESC
+*/
+DECLARE @start as int  = 17985;
+DECLARE @end as int = 18024;
+ 
+SELECT TOP 20 T.*
+, (total_duration_microseconds / count_executions) as 'avg_duration_microseconds'
+, (total_duration_microseconds / 60000000.0) as 'total_duration_minutes'
+, txt.query_sql_text
+--, (SELECT TOP 1 CAST(p2.query_plan as XML) as queryPlanXML FROM sys.query_store_plan p2 WHERE p2.plan_id=T.plan_id)  -- if you need the query plan
+FROM 
+(
+SELECT 
+p.query_id
+, sts.plan_id
+, sts.execution_type_desc
+, SUM(p.count_compiles) as 'count_compiles'
+, SUM(sts.count_executions) as 'count_executions'
+, SUM(sts.avg_duration * sts.count_executions) as 'total_duration_microseconds'
+, MAX(sts.max_duration) as 'max_duration'
+, SUM(sts.avg_cpu_time * sts.count_executions) as 'total_cpu_time'
+, SUM(sts.avg_logical_io_reads * sts.count_executions) as 'total_logical_io_reads'
+, SUM(sts.avg_physical_io_reads * sts.count_executions) as 'total_physical_io_reads'
+, SUM(sts.avg_page_server_io_reads * sts.count_executions) as 'total_page_server_io_reads'
+, SUM(sts.avg_logical_io_writes * sts.count_executions) as 'total_logical_io_writes'
+, SUM(sts.avg_log_bytes_used * sts.count_executions) as 'total_log_bytes_used'
+, SUM(sts.avg_query_max_used_memory * sts.count_executions) as 'total_query_max_used_memory'
+, SUM(sts.avg_tempdb_space_used * sts.count_executions) as 'total_tempdb_space_used'
+, AVG(sts.avg_rowcount) as 'avg_rowcount'
+FROM sys.query_store_runtime_stats sts
+INNER HASH JOIN sys.query_store_plan p ON (sts.plan_id = p.plan_id)
+WHERE 
+-- start
+sts.runtime_stats_interval_id >= @start
+-- end
+AND sts.runtime_stats_interval_id <= @end
+GROUP BY
+    p.query_id
+, sts.plan_id
+    , sts.execution_type_desc
+) as T
+JOIN sys.query_store_query q ON (T.query_id = q.query_id)
+JOIN sys.query_store_query_text txt ON (txt.query_text_id = q.query_text_id)
+ORDER BY 'total_cpu_time' DESC
+ 
